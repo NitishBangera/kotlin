@@ -20,7 +20,9 @@ import kotlin.jvm.functions.Function1;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns;
+import org.jetbrains.kotlin.descriptors.PossiblyInnerType;
 import org.jetbrains.kotlin.descriptors.TypeParameterDescriptor;
+import org.jetbrains.kotlin.descriptors.TypeParameterUtilsKt;
 import org.jetbrains.kotlin.descriptors.annotations.Annotations;
 import org.jetbrains.kotlin.descriptors.annotations.CompositeAnnotations;
 import org.jetbrains.kotlin.descriptors.annotations.FilteredAnnotations;
@@ -254,8 +256,25 @@ public class TypeSubstitutor implements TypeSubstitutorMarker {
             substitutedAbbreviation = substitute(abbreviation, Variance.INVARIANT);
         }
 
-        List<TypeProjection> substitutedArguments = substituteTypeArguments(
-                type.getConstructor().getParameters(), type.getArguments(), recursionDepth);
+        List<TypeProjection> substitutedArguments;
+        PossiblyInnerType possiblyInnerType = TypeParameterUtilsKt.buildPossiblyInnerType(type);
+        if (possiblyInnerType != null) {
+            substitutedArguments = new ArrayList<TypeProjection>();
+
+            while (possiblyInnerType != null) {
+                substitutedArguments.addAll(
+                        substituteTypeArguments(
+                                possiblyInnerType.getClassifierDescriptor().getDeclaredTypeParameters(),
+                                possiblyInnerType.getArguments(),
+                                recursionDepth
+                        )
+                );
+
+                possiblyInnerType = possiblyInnerType.getOuterType();
+            }
+        } else {
+            substitutedArguments = substituteTypeArguments(type.getConstructor().getParameters(), type.getArguments(), recursionDepth);
+        }
 
         KotlinType substitutedType =
                 TypeSubstitutionKt.replace(type, substitutedArguments, substitution.filterAnnotations(type.getAnnotations()));
