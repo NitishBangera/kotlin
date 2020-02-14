@@ -10,25 +10,141 @@ import org.jetbrains.kotlin.descriptors.commonizer.builder.DeclarationsBuilderVi
 import org.jetbrains.kotlin.descriptors.commonizer.builder.DeclarationsBuilderVisitor2
 import org.jetbrains.kotlin.descriptors.commonizer.builder.createGlobalBuilderComponents
 import org.jetbrains.kotlin.descriptors.commonizer.core.CommonizationVisitor
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.*
 import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.mergeRoots
+import org.jetbrains.kotlin.descriptors.commonizer.utils.ResettableClockMark
 import org.jetbrains.kotlin.storage.LockBasedStorageManager
 
 fun runCommonization(parameters: CommonizationParameters): CommonizationResult {
     if (!parameters.hasIntersection())
         return NothingToCommonize
 
+    println(
+        """
+        = Before building merged tree
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
+
     val storageManager = LockBasedStorageManager("Declaration descriptors commonization")
+
+    val clock = ResettableClockMark()
 
     // build merged tree:
     val mergedTree = mergeRoots(storageManager, parameters.getModulesByTargets())
 
+    println(
+        """
+        = Built merged tree in ${clock.elapsedSinceLast()}
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
+
+    // GC is almost useless, just 13% drop
+//    for (i in 1..10) {
+//        System.gc()
+//    }
+//
+//    println("NOW!!!")
+//    Thread.sleep(30_000)
+
+    println(
+//        """
+//        = GC in ${clock.elapsedSinceLast()}
+//          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+//          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+//          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+//          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+//        """.trimIndent()
+//    )
+
     // commonize:
     mergedTree.accept(CommonizationVisitor(mergedTree), Unit)
+
+    println(
+        """
+        = Core commonization performed in ${clock.elapsedSinceLast()}
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
+
+    // GC is useless
+//    for (i in 1..10) {
+//        System.gc()
+//    }
+//
+//    println(
+//        """
+//        = GC in ${clock.elapsedSinceLast()}
+//          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+//          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+//          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+//          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+//        """.trimIndent()
+//    )
 
     // build resulting descriptors:
     val components = mergedTree.createGlobalBuilderComponents(storageManager, parameters.statsCollector)
     mergedTree.accept(DeclarationsBuilderVisitor1(components), emptyList())
+    println(
+        """
+        = New descriptors (stage 1) built in ${clock.elapsedSinceLast()}
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
+
+    // GC is useless
+//    for (i in 1..10) {
+//        System.gc()
+//    }
+//
+//    println(
+//        """
+//        = GC in ${clock.elapsedSinceLast()}
+//          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+//          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+//          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+//          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+//        """.trimIndent()
+//    )
+
     mergedTree.accept(DeclarationsBuilderVisitor2(components), emptyList())
+    println(
+        """
+        = New descriptors (stage 2) built in ${clock.elapsedSinceLast()}
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
+
+    // GC is useless
+//    for (i in 1..10) {
+//        System.gc()
+//    }
+//
+//    println(
+//        """
+//        = GC in ${clock.elapsedSinceLast()}
+//          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+//          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+//          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+//          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+//        """.trimIndent()
+//    )
 
     val modulesByTargets = LinkedHashMap<Target, Collection<ModuleDescriptor>>() // use linked hash map to preserve order
     components.targetComponents.forEach {
