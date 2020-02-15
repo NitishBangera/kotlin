@@ -10,13 +10,12 @@ import org.jetbrains.kotlin.descriptors.commonizer.builder.DeclarationsBuilderVi
 import org.jetbrains.kotlin.descriptors.commonizer.builder.DeclarationsBuilderVisitor2
 import org.jetbrains.kotlin.descriptors.commonizer.builder.createGlobalBuilderComponents
 import org.jetbrains.kotlin.descriptors.commonizer.core.CommonizationVisitor
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.*
 import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.mergeRoots
 import org.jetbrains.kotlin.descriptors.commonizer.utils.ResettableClockMark
 import org.jetbrains.kotlin.storage.LockBasedStorageManager
 
-fun runCommonization(parameters: CommonizationParameters): CommonizationResult {
-    if (!parameters.hasIntersection())
+fun runCommonization(parameters: Parameters): Result {
+    if (!parameters.hasAnythingToCommonize())
         return NothingToCommonize
 
     println(
@@ -34,7 +33,7 @@ fun runCommonization(parameters: CommonizationParameters): CommonizationResult {
     val clock = ResettableClockMark()
 
     // build merged tree:
-    val mergedTree = mergeRoots(storageManager, parameters.getModulesByTargets())
+    val mergedTree = mergeRoots(storageManager, parameters.targetProviders)
 
     println(
         """
@@ -47,22 +46,22 @@ fun runCommonization(parameters: CommonizationParameters): CommonizationResult {
     )
 
     // GC is almost useless, just 13% drop
-//    for (i in 1..10) {
-//        System.gc()
-//    }
-//
-//    println("NOW!!!")
+    for (i in 1..10) {
+        System.gc()
+    }
+
+    println("NOW!!!")
 //    Thread.sleep(30_000)
 
     println(
-//        """
-//        = GC in ${clock.elapsedSinceLast()}
-//          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
-//          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
-//          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
-//          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
-//        """.trimIndent()
-//    )
+        """
+        = GC in ${clock.elapsedSinceLast()}
+          Free  (MB): ${Runtime.getRuntime().freeMemory() / 1024 / 1024}
+          Used  (MB): ${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024}
+          Total (MB): ${Runtime.getRuntime().totalMemory() / 1024 / 1024}
+          Max   (MB): ${Runtime.getRuntime().maxMemory() / 1024 / 1024}
+        """.trimIndent()
+    )
 
     // commonize:
     mergedTree.accept(CommonizationVisitor(mergedTree), Unit)
