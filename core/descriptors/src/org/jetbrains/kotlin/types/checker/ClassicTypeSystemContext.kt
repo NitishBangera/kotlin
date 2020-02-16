@@ -159,6 +159,12 @@ interface ClassicTypeSystemContext : TypeSystemInferenceExtensionContext, TypeSy
         return this.arguments[index]
     }
 
+    override fun KotlinTypeMarker.buildPossiblyGenericInnerType(): PossiblyGenericInnerType? {
+        require(this is KotlinType, this::errorMessage)
+        val possiblyInnerType = buildPossiblyInnerType() ?: return null
+        return PossiblyGenericInnerTypeImpl(possiblyInnerType)
+    }
+
     override fun TypeArgumentMarker.isStarProjection(): Boolean {
         require(this is TypeProjection, this::errorMessage)
         return this.isStarProjection

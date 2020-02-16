@@ -30,6 +30,12 @@ interface CapturedTypeConstructorMarker : TypeConstructorMarker
 
 interface TypeSubstitutorMarker
 
+interface PossiblyGenericInnerType {
+    val arguments: List<TypeArgumentMarker>
+    val parameters: List<TypeParameterMarker>
+    val outerType: PossiblyGenericInnerType?
+}
+
 
 enum class TypeVariance(val presentation: String) {
     IN("in"),
@@ -199,6 +205,7 @@ interface TypeSystemContext : TypeSystemOptimizationContext {
 
     fun KotlinTypeMarker.argumentsCount(): Int
     fun KotlinTypeMarker.getArgument(index: Int): TypeArgumentMarker
+    fun KotlinTypeMarker.buildPossiblyGenericInnerType(): PossiblyGenericInnerType?
 
     fun SimpleTypeMarker.getArgumentOrNull(index: Int): TypeArgumentMarker? {
         if (index in 0 until argumentsCount()) return getArgument(index)

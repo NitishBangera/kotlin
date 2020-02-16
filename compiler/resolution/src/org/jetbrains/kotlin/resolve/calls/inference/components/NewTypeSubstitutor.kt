@@ -149,12 +149,7 @@ interface NewTypeSubstitutor: TypeSubstitutorMarker {
         keepAnnotation: Boolean,
         runCapturedChecks: Boolean
     ): UnwrappedType? {
-        val parameters = type.constructor.parameters
         val arguments = type.arguments
-        if (parameters.size != arguments.size) {
-            // todo error type or exception?
-            return ErrorUtils.createErrorType("Inconsistent type: $type (parameters.size = ${parameters.size}, arguments.size = ${arguments.size})")
-        }
         val newArguments = arrayOfNulls<TypeProjection?>(arguments.size)
 
         for (index in arguments.indices) {

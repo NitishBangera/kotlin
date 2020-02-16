@@ -85,7 +85,8 @@ open class TypeApproximatorConfiguration {
 
     object IncorporationConfiguration : TypeApproximatorConfiguration.AbstractCapturedTypesApproximation(FOR_INCORPORATION)
     object SubtypeCapturedTypesApproximation : TypeApproximatorConfiguration.AbstractCapturedTypesApproximation(FOR_SUBTYPING)
-    object CapturedAndIntegerLiteralsTypesApproximation : TypeApproximatorConfiguration.AbstractCapturedTypesApproximation(FROM_EXPRESSION) {
+    object CapturedAndIntegerLiteralsTypesApproximation :
+        TypeApproximatorConfiguration.AbstractCapturedTypesApproximation(FROM_EXPRESSION) {
         override val integerLiteralType: Boolean get() = true
     }
 
@@ -460,154 +461,218 @@ abstract class AbstractTypeApproximator(val ctx: TypeSystemInferenceExtensionCon
         toSuper: Boolean,
         depth: Int
     ): SimpleTypeMarker? {
-        val typeConstructor = type.typeConstructor()
-        if (typeConstructor.parametersCount() != type.argumentsCount()) {
-            return if (conf.errorType) {
-                createErrorType("Inconsistent type: $type (parameters.size = ${typeConstructor.parametersCount()}, arguments.size = ${type.argumentsCount()})")
-            } else type.defaultResult(toSuper)
-        }
+        var possiblyGenericInnerType = type.buildPossiblyGenericInnerType()
+        if (possiblyGenericInnerType == null) {
+            val typeConstructor = type.typeConstructor()
+            if (typeConstructor.parametersCount() != type.argumentsCount()) {
+                return if (conf.errorType) {
+                    createErrorType(
+                        "Inconsistent type: $type (parameters.size = ${typeConstructor.parametersCount()}, " +
+                                "arguments.size = ${type.argumentsCount()})"
+                    )
+                } else type.defaultResult(toSuper)
+            }
 
-        val newArguments = arrayOfNulls<TypeArgumentMarker?>(type.argumentsCount())
 
-        loop@ for (index in 0 until type.argumentsCount()) {
-            val parameter = typeConstructor.getParameter(index)
-            val argument = type.getArgument(index)
+            val allNewArguments = mutableListOf<TypeArgumentMarker>()
+            var wasApproximation = false
+            for (index in 0 until type.argumentsCount()) {
+                val parameter = typeConstructor.getParameter(index)
+                val argument = type.getArgument(index)
+                when (val approximatedArgument = approximatedTypeArgument(argument, parameter, conf, toSuper, depth)) {
+                    ApproximatedParametrizedType.DefaultResult -> return type.defaultResult(toSuper)
 
-            if (argument.isStarProjection()) continue
+                    is ApproximatedParametrizedType.ErrorResult -> return approximatedArgument.type
 
-            val effectiveVariance = AbstractTypeChecker.effectiveVariance(parameter.getVariance(), argument.getVariance())
-            if (effectiveVariance == TypeVariance.INV) {
-                val argumentType = argument.getType()
-                if (argumentType is DefinitelyNotNullTypeMarker && !conf.definitelyNotNullTypeInInvariantPosition) {
-                    newArguments[index] = argumentType.original().withNullability(false).asTypeArgument()
+                    is ApproximatedParametrizedType.ApproximatedArgument -> {
+                        wasApproximation = true
+                        allNewArguments.add(approximatedArgument.argument)
+                    }
+
+                    null -> allNewArguments.add(argument)
                 }
             }
 
-            val argumentType = newArguments[index]?.getType() ?: argument.getType()
+            return if (wasApproximation) type.replaceArguments(allNewArguments) else null
+        }
 
-            val capturedType = argumentType.lowerBoundIfFlexible().asCapturedType()
-            val capturedStarProjectionOrNull =
-                capturedType?.typeConstructorProjection()?.takeIf { it.isStarProjection() }
+        val allNewArguments = mutableListOf<TypeArgumentMarker>()
+        var wasApproximation = false
+        while (possiblyGenericInnerType != null) {
+            val arguments = possiblyGenericInnerType.arguments
+            val parameters = possiblyGenericInnerType.parameters
 
-            if (capturedStarProjectionOrNull != null &&
-                (effectiveVariance == TypeVariance.OUT || effectiveVariance == TypeVariance.INV) &&
-                toSuper &&
-                capturedType.typeParameter() == parameter
-            ) {
-                newArguments[index] = capturedStarProjectionOrNull
-                continue@loop
+            for (index in arguments.indices) {
+                when (val approximatedArgument = approximatedTypeArgument(arguments[index], parameters[index], conf, toSuper, depth)) {
+                    ApproximatedParametrizedType.DefaultResult -> return type.defaultResult(toSuper)
+
+                    is ApproximatedParametrizedType.ErrorResult -> return approximatedArgument.type
+
+                    is ApproximatedParametrizedType.ApproximatedArgument -> {
+                        wasApproximation = true
+                        allNewArguments.add(approximatedArgument.argument)
+                    }
+
+                    null -> allNewArguments.add(arguments[index])
+                }
             }
 
-            when (effectiveVariance) {
-                null -> {
-                    return if (conf.errorType) {
-                        createErrorType(
-                            "Inconsistent type: $type ($index parameter has declared variance: ${parameter.getVariance()}, " +
-                                    "but argument variance is ${argument.getVariance()})"
+            possiblyGenericInnerType = possiblyGenericInnerType.outerType
+        }
+
+        return if (wasApproximation) type.replaceArguments(allNewArguments) else null
+    }
+
+    private sealed class ApproximatedParametrizedType {
+        object DefaultResult : ApproximatedParametrizedType()
+
+        class ErrorResult(val type: SimpleTypeMarker) : ApproximatedParametrizedType()
+
+        class ApproximatedArgument(val argument: TypeArgumentMarker) : ApproximatedParametrizedType()
+    }
+
+    private fun SimpleTypeMarker.toErrorResult(): ApproximatedParametrizedType.ErrorResult =
+        ApproximatedParametrizedType.ErrorResult(this)
+
+    private fun approximatedTypeArgument(
+        argument: TypeArgumentMarker,
+        parameter: TypeParameterMarker,
+        conf: TypeApproximatorConfiguration,
+        toSuper: Boolean,
+        depth: Int
+    ): ApproximatedParametrizedType? {
+        if (argument.isStarProjection()) return null
+
+        val effectiveVariance = AbstractTypeChecker.effectiveVariance(parameter.getVariance(), argument.getVariance())
+        var newArgument: TypeArgumentMarker? = null
+        if (effectiveVariance == TypeVariance.INV) {
+            val argumentType = argument.getType()
+            if (argumentType is DefinitelyNotNullTypeMarker && !conf.definitelyNotNullTypeInInvariantPosition) {
+                newArgument = argumentType.original().withNullability(false).asTypeArgument()
+            }
+        }
+
+        val argumentType = newArgument?.getType() ?: argument.getType()
+
+        val capturedType = argumentType.lowerBoundIfFlexible().asCapturedType()
+        val capturedStarProjectionOrNull =
+            capturedType?.typeConstructorProjection()?.takeIf { it.isStarProjection() }
+
+        if (capturedStarProjectionOrNull != null &&
+            (effectiveVariance == TypeVariance.OUT || effectiveVariance == TypeVariance.INV) &&
+            toSuper &&
+            capturedType.typeParameter() == parameter
+        ) {
+            newArgument = capturedStarProjectionOrNull
+            return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
+        }
+
+        when (effectiveVariance) {
+            null -> {
+                return if (conf.errorType) {
+                    createErrorType(
+                        "Inconsistent type: (parameter has declared variance: ${parameter.getVariance()}, " +
+                                "but argument variance is ${argument.getVariance()})"
+                    ).toErrorResult()
+                } else ApproximatedParametrizedType.DefaultResult
+            }
+            TypeVariance.OUT, TypeVariance.IN -> {
+                /**
+                 * Out<Foo> <: Out<superType(Foo)>
+                 * Inv<out Foo> <: Inv<out superType(Foo)>
+
+                 * In<Foo> <: In<subType(Foo)>
+                 * Inv<in Foo> <: Inv<in subType(Foo)>
+                 */
+                val approximatedArgument = argumentType.let {
+                    if (isApproximateDirectionToSuper(effectiveVariance, toSuper)) {
+                        approximateToSuperType(it, conf, depth)
+                    } else {
+                        approximateToSubType(it, conf, depth)
+                    }
+                } ?: return null
+
+                if (
+                    conf.intersection != ALLOWED &&
+                    effectiveVariance == TypeVariance.OUT &&
+                    argumentType.typeConstructor().isIntersection()
+                ) {
+                    var shouldReplaceWithStar = false
+                    for (upperBoundIndex in 0 until parameter.upperBoundCount()) {
+                        if (!AbstractTypeChecker.isSubtypeOf(ctx, approximatedArgument, parameter.getUpperBound(upperBoundIndex))) {
+                            shouldReplaceWithStar = true
+                            break
+                        }
+                    }
+                    if (shouldReplaceWithStar) {
+                        newArgument = createStarProjection(parameter)
+                        return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
+                    }
+                }
+
+                if (parameter.getVariance() == TypeVariance.INV) {
+                    newArgument = createTypeArgument(approximatedArgument, effectiveVariance)
+                } else {
+                    newArgument = approximatedArgument.asTypeArgument()
+                }
+            }
+            TypeVariance.INV -> {
+                if (!toSuper) {
+                    // Inv<Foo> cannot be approximated to subType
+                    val toSubType = approximateToSubType(argumentType, conf, depth) ?: return null
+
+                    // Inv<Foo!> is supertype for Inv<Foo?>
+                    if (!AbstractTypeChecker.equalTypes(
+                            this,
+                            argumentType,
+                            toSubType
                         )
-                    } else type.defaultResult(toSuper)
+                    ) return ApproximatedParametrizedType.DefaultResult
+
+                    // also Captured(out Nothing) = Nothing
+                    newArgument = toSubType.asTypeArgument()
+                    return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
                 }
-                TypeVariance.OUT, TypeVariance.IN -> {
-                    /**
-                     * Out<Foo> <: Out<superType(Foo)>
-                     * Inv<out Foo> <: Inv<out superType(Foo)>
 
-                     * In<Foo> <: In<subType(Foo)>
-                     * Inv<in Foo> <: Inv<in subType(Foo)>
-                     */
-                    val approximatedArgument = argumentType.let {
-                        if (isApproximateDirectionToSuper(effectiveVariance, toSuper)) {
-                            approximateToSuperType(it, conf, depth)
-                        } else {
-                            approximateToSubType(it, conf, depth)
-                        }
-                    } ?: continue@loop
-
-                    if (
-                        conf.intersection != ALLOWED &&
-                        effectiveVariance == TypeVariance.OUT &&
-                        argumentType.typeConstructor().isIntersection()
-                    ) {
-                        var shouldReplaceWithStar = false
-                        for (upperBoundIndex in 0 until parameter.upperBoundCount()) {
-                            if (!AbstractTypeChecker.isSubtypeOf(ctx, approximatedArgument, parameter.getUpperBound(upperBoundIndex))) {
-                                shouldReplaceWithStar = true
-                                break
-                            }
-                        }
-                        if (shouldReplaceWithStar) {
-                            newArguments[index] = createStarProjection(parameter)
-                            continue@loop
-                        }
-                    }
-
-                    if (parameter.getVariance() == TypeVariance.INV) {
-                        newArguments[index] = createTypeArgument(approximatedArgument, effectiveVariance)
-                    } else {
-                        newArguments[index] = approximatedArgument.asTypeArgument()
+                /**
+                 * Example with non-trivial both type approximations:
+                 * Inv<In<C>> where C = in Int
+                 * Inv<In<C>> <: Inv<out In<Int>>
+                 * Inv<In<C>> <: Inv<in In<Any?>>
+                 *
+                 * So such case is rare and we will chose Inv<out In<Int>> for now.
+                 *
+                 * Note that for case Inv<C> we will chose Inv<in Int>, because it is more informative then Inv<out Any?>.
+                 * May be we should do the same for deeper types, but not now.
+                 */
+                if (argumentType.typeConstructor() is NewCapturedTypeConstructor) {
+                    val subType = approximateToSubType(argumentType, conf, depth) ?: return null
+                    if (!subType.isTrivialSub()) {
+                        newArgument = createTypeArgument(subType, TypeVariance.IN)
+                        return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
                     }
                 }
-                TypeVariance.INV -> {
-                    if (!toSuper) {
-                        // Inv<Foo> cannot be approximated to subType
-                        val toSubType = approximateToSubType(argumentType, conf, depth) ?: continue@loop
 
-                        // Inv<Foo!> is supertype for Inv<Foo?>
-                        if (!AbstractTypeChecker.equalTypes(
-                                this,
-                                argumentType,
-                                toSubType
-                            )
-                        ) return type.defaultResult(toSuper)
-
-                        // also Captured(out Nothing) = Nothing
-                        newArguments[index] = toSubType.asTypeArgument()
-                        continue@loop
+                val approximatedSuperType =
+                    approximateToSuperType(argumentType, conf, depth) ?: return null // null means that this type we can leave as is
+                if (approximatedSuperType.isTrivialSuper()) {
+                    val approximatedSubType =
+                        approximateToSubType(argumentType, conf, depth) ?: return null // seems like this is never null
+                    if (!approximatedSubType.isTrivialSub()) {
+                        newArgument = createTypeArgument(approximatedSubType, TypeVariance.IN)
+                        return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
                     }
+                }
 
-                    /**
-                     * Example with non-trivial both type approximations:
-                     * Inv<In<C>> where C = in Int
-                     * Inv<In<C>> <: Inv<out In<Int>>
-                     * Inv<In<C>> <: Inv<in In<Any?>>
-                     *
-                     * So such case is rare and we will chose Inv<out In<Int>> for now.
-                     *
-                     * Note that for case Inv<C> we will chose Inv<in Int>, because it is more informative then Inv<out Any?>.
-                     * May be we should do the same for deeper types, but not now.
-                     */
-                    if (argumentType.typeConstructor() is NewCapturedTypeConstructor) {
-                        val subType = approximateToSubType(argumentType, conf, depth) ?: continue@loop
-                        if (!subType.isTrivialSub()) {
-                            newArguments[index] = createTypeArgument(subType, TypeVariance.IN)
-                            continue@loop
-                        }
-                    }
-
-                    val approximatedSuperType =
-                        approximateToSuperType(argumentType, conf, depth) ?: continue@loop // null means that this type we can leave as is
-                    if (approximatedSuperType.isTrivialSuper()) {
-                        val approximatedSubType =
-                            approximateToSubType(argumentType, conf, depth) ?: continue@loop // seems like this is never null
-                        if (!approximatedSubType.isTrivialSub()) {
-                            newArguments[index] = createTypeArgument(approximatedSubType, TypeVariance.IN)
-                            continue@loop
-                        }
-                    }
-
-                    if (AbstractTypeChecker.equalTypes(this, argumentType, approximatedSuperType)) {
-                        newArguments[index] = approximatedSuperType.asTypeArgument()
-                    } else {
-                        newArguments[index] = createTypeArgument(approximatedSuperType, TypeVariance.OUT)
-                    }
+                if (AbstractTypeChecker.equalTypes(this, argumentType, approximatedSuperType)) {
+                    newArgument = approximatedSuperType.asTypeArgument()
+                } else {
+                    newArgument = createTypeArgument(approximatedSuperType, TypeVariance.OUT)
                 }
             }
         }
 
-        if (newArguments.all { it == null }) return null
-
-        val newArgumentsList = List(type.argumentsCount()) { index -> newArguments[index] ?: type.getArgument(index) }
-        return type.replaceArguments(newArgumentsList)
+        return ApproximatedParametrizedType.ApproximatedArgument(newArgument)
     }
 
     private fun KotlinTypeMarker.defaultResult(toSuper: Boolean) = if (toSuper) nullableAnyType() else {
