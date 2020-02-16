@@ -6,8 +6,11 @@
 package org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir
 
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
+import org.jetbrains.kotlin.descriptors.commonizer.utils.intern
 import org.jetbrains.kotlin.name.Name
 
-data class CirModule(val name: Name) : CirDeclaration {
+class CirModule(name: Name) : CirDeclaration {
     constructor(descriptor: ModuleDescriptor) : this(descriptor.name)
+
+    val name = name.intern()
 }
