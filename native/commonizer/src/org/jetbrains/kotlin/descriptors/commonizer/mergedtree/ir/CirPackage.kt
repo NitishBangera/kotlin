@@ -5,6 +5,9 @@
 
 package org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir
 
+import org.jetbrains.kotlin.descriptors.commonizer.utils.intern
 import org.jetbrains.kotlin.name.FqName
 
-data class CirPackage(val fqName: FqName) : CirDeclaration
+class CirPackage(fqName: FqName) : CirDeclaration {
+    val fqName = fqName.intern()
+}

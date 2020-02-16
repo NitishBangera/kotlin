@@ -20,6 +20,8 @@ internal inline val KotlinType.declarationDescriptor: ClassifierDescriptor
 internal inline val KotlinType.fqName: FqName
     get() = declarationDescriptor.fqNameSafe
 
+internal fun FqName.intern(): FqName = fqNameInterner.intern(this)
+
 internal val KotlinType.fqNameWithTypeParameters: String
     get() {
         // use of interner saves up to 95% of duplicates
@@ -70,4 +72,6 @@ private fun StringBuilder.buildFqNameWithTypeParameters(type: KotlinType, explor
 }
 
 // dedicated to hold unique entries of "fqNameWithTypeParameters"
-private val stringInterner = Interner<String>()
+private val stringInterner = NonThreadSafeInterner<String>()
+
+private val fqNameInterner = NonThreadSafeInterner<FqName>()
