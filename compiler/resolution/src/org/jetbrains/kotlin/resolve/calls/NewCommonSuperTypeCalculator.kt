@@ -100,15 +100,16 @@ object NewCommonSuperTypeCalculator {
         if (types.all { it is ErrorType }) {
             return ErrorUtils.createErrorType("CST(${types.joinToString()}")
         }
+        val nonErrorTypes = types.filterNot { it is ErrorType }
 
         // i.e. result type also should be marked nullable
         val notAllNotNull =
-            types.any { !isStubRelatedType(it) && !AbstractNullabilityChecker.isSubtypeOfAny(contextStubTypesEqualToAnything, it) }
-        val notNullTypes = if (notAllNotNull) types.map { it.withNullability(false) } else types
+            nonErrorTypes.any { !isStubRelatedType(it) && !AbstractNullabilityChecker.isSubtypeOfAny(contextStubTypesEqualToAnything, it) }
+        val notNullTypes = if (notAllNotNull) nonErrorTypes.map { it.withNullability(false) } else nonErrorTypes
 
         val commonSuperType = commonSuperTypeForNotNullTypes(notNullTypes, depth, contextStubTypesEqualToAnything, contextStubTypesNotEqual)
         return if (notAllNotNull)
-            refineNullabilityForUndefinedNullability(types, commonSuperType) ?: commonSuperType.withNullability(true)
+            refineNullabilityForUndefinedNullability(nonErrorTypes, commonSuperType) ?: commonSuperType.withNullability(true)
         else
             commonSuperType
     }
